@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: Sample lambda function subscribed to SNS
+Parameters:
+  ArtifactBucket:
+    Description: The name of the artifacts bucket
+    Type: String
+  ArtifactFolder:
+    Description: The folder containing the build artifacts
+    Type: String
+  EnvironmentName:
+    Description: The environment name
+    Type: String
+Resources:
+  LogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: !Sub /aws/lambda/${ProjectName}-${EnvironmentName}
+        RetentionInDays: 14
+        
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        -
+          PolicyName: lambda-execution
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt LogGroup.Arn
+                
+  LambdaFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: !Sub ${ProjectName}-${EnvironmentName}
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.6
+      CodeUri:
+        Bucket: !Ref ArtifactBucket
+        Key: !Sub ${ArtifactFolder}/main.zip
+      MemorySize: 128
+      Role: !GetAtt LambdaRole.Arn
+      Variables:
+        CasKey: !Ref CasAuthToken
+
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+      - Endpoint:
+          Fn::GetAtt:
+          - LambdaFunction
+          - Arn
+        Protocol: lambda
+    DependsOn:
+    - LambdaFunction
+
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn:
+        Ref: Topic
+      FunctionName:
+        Fn::GetAtt:
+        - LambdaFunction
+        - Arn
